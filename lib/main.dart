@@ -13,7 +13,7 @@ import 'package:shizuku_api/shizuku_api.dart';
 const game = 'com.Sunborn.SnqxExilium';
 const configPath = 'LocalCache/Data/GameConfig.cfg';
 const tablePath = 'LocalCache/Data/Table';
-const bundledPatch = 'patch/gf2-es-android-1.0.0.zip';
+String bundledPatch(String locale) => 'patch/gf2-$locale-android-1.0.0.zip';
 const patchVersion = '1.0.0';
 void main() => runApp(const PatchApp());
 
@@ -21,7 +21,7 @@ class PatchApp extends StatelessWidget {
   const PatchApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'GF2 Exilium ES',
+    title: 'GRIFFIN ES/EN',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -47,9 +47,13 @@ class _PatchPageState extends State<PatchPage>
     text: '/storage/emulated/0/Android/data/$game/files',
   );
   bool busy = false, writable = false, installed = false;
+  String locale = 'es';
+  String? installedLocale;
+  final patchedHashes = <String, String>{};
+  String t(String es, String en) => locale == 'en' ? en : es;
   double progress = 0;
   int? shizukuUid;
-  String status = 'Inicia Shizuku y pulsa Conectar.';
+  String status = 'Inicia Shizuku y pulsa Conectar. · Start Shizuku and tap Connect.';
   String client = '', tables = '';
   String patchLabel = '';
   String? patchTables;
@@ -84,25 +88,25 @@ class _PatchPageState extends State<PatchPage>
 
   Future<bool> shizukuReady() async {
     if (!(await api.pingBinder() ?? false)) {
-      message('Shizuku no está iniciado. Ábrelo y arráncalo primero.');
+      message(t('Shizuku no está iniciado. Ábrelo y arráncalo primero.', 'Shizuku is not running. Open it and start it first.'));
       return false;
     }
     var allowed = await api.checkPermission() ?? false;
     if (!allowed) allowed = await api.requestPermission() ?? false;
-    if (!allowed) message('No se concedió el permiso de Shizuku.');
+    if (!allowed) message(t('No se concedió el permiso de Shizuku.', 'Shizuku permission was not granted.'));
     return allowed;
   }
 
   Future<void> check() async {
     setState(() {
       busy = true;
-      status = 'Comprobando Shizuku…';
+      status = t('Comprobando Shizuku…', 'Checking Shizuku…');
     });
     try {
       if (!await shizukuReady()) return;
       final path = root.text.trim();
       if (!_validRoot(path)) {
-        message('La ruta debe acabar en /$game/files.');
+        message(t('La ruta debe acabar en /$game/files.', 'The path must end in /$game/files.'));
         return;
       }
       final q = quote(path);
@@ -126,45 +130,81 @@ fi
       );
       if (!out.contains('FOUND') || out.contains('NOT_FOUND')) {
         writable = false;
-        message(
+        message(t(
           'No encuentro los datos del juego. Ábrelo una vez y deja que termine de descargar antes de instalar el parche.',
-        );
+          'Game data not found. Open the game once and let it finish downloading before installing the patch.',
+        ));
         return;
       }
       client = RegExp(r'CLIENT=([^\r\n]*)').firstMatch(out)?.group(1) ?? '';
       tables = RegExp(r'TABLES=([^\r\n]*)').firstMatch(out)?.group(1) ?? '';
       final main = RegExp(r'MAIN=([0-9a-f]{64})').firstMatch(out)?.group(1);
       writable = out.contains('WRITE_PROBE=1');
+      await loadKnownHashes();
       if (files.isEmpty) await loadBundled();
-      final patched = files
-          .where((f) => f['path']!.endsWith('/LangPackageTableCnData.bytes'))
-          .map((f) => f['hash'])
-          .firstOrNull;
-      installed = main != null && main == patched;
+      installedLocale = main == null ? null : patchedHashes[main];
+      installed = installedLocale != null;
       message(
         !writable
-            ? 'Se ven los datos del juego (UID ${shizukuUid ?? '?'}), pero no se pueden escribir. Usa Shizuku con ADB inalámbrico o root.'
+            ? t('Se ven los datos del juego (UID ${shizukuUid ?? '?'}), pero no se pueden escribir. Usa Shizuku con ADB inalámbrico o root.',
+                'The game data is visible (UID ${shizukuUid ?? '?'}) but not writable. Use Shizuku with wireless ADB or root.')
             : installed
-            ? 'El juego ya está en español. Si una actualización lo devolvió al chino, vuelve a instalar.'
+            ? t('El juego ya está en ${installedLocale == 'en' ? 'inglés' : 'español'}. Puedes cambiar de idioma o volver al chino.',
+                'The game is already in ${installedLocale == 'en' ? 'English' : 'Spanish'}. You can switch language or go back to Chinese.')
             : patchTables != null && patchTables != tables
-            ? 'Conectado. Ojo: el parche es para las tablas $patchTables y el juego tiene $tables.'
-            : 'Conectado. Cierra el juego y pulsa Instalar en español.',
+            ? t('Conectado. Ojo: el parche es para las tablas $patchTables y el juego tiene $tables.',
+                'Connected. Warning: the patch is for tables $patchTables and the game has $tables.')
+            : t('Conectado. Pulsa Instalar.', 'Connected. Tap Install.'),
       );
     } catch (e) {
-      message('Error de Shizuku: $e');
+      message(t('Error de Shizuku: $e', 'Shizuku error: $e'));
     } finally {
       if (mounted) setState(() => busy = false);
     }
   }
 
+  /// sha256 of the patched main table of every bundled language, to recognise
+  /// a game that is already translated (and never back it up as "original").
+  Future<void> loadKnownHashes() async {
+    if (patchedHashes.isNotEmpty) return;
+    for (final l in const ['es', 'en']) {
+      final data = await rootBundle.load(bundledPatch(l));
+      final archive = ZipDecoder().decodeBytes(data.buffer.asUint8List());
+      final manifest = archive.files.firstWhere((f) => f.name == 'manifest.json');
+      final json = jsonDecode(utf8.decode(manifest.content)) as Map<String, dynamic>;
+      for (final f in json['files'] as List) {
+        final e = f as Map<String, dynamic>;
+        if ((e['path'] as String).endsWith('/LangPackageTableCnData.bytes')) {
+          patchedHashes[e['sha256'] as String] = l;
+        }
+      }
+    }
+  }
+
   Future<void> loadBundled() async {
     final ext = await getExternalStorageDirectory();
-    if (ext == null) throw Exception('No hay almacenamiento externo.');
-    final zip = File('${ext.path}/gf2_es_patch/bundled.zip');
+    if (ext == null) throw Exception(t('No hay almacenamiento externo.', 'No external storage.'));
+    final zip = File('${ext.path}/gf2_es_patch/bundled-$locale.zip');
     await zip.parent.create(recursive: true);
-    final data = await rootBundle.load(bundledPatch);
+    final data = await rootBundle.load(bundledPatch(locale));
     await zip.writeAsBytes(data.buffer.asUint8List(), flush: true);
-    await loadZip(zip.path, label: 'Incluido · v$patchVersion');
+    await loadZip(zip.path, label: '${t('Incluido', 'Bundled')} · v$patchVersion');
+  }
+
+  Future<void> setLocale(String l) async {
+    if (l == locale || busy) return;
+    setState(() {
+      locale = l;
+      busy = true;
+    });
+    try {
+      if (client.isNotEmpty) await loadBundled();
+      message(t('Idioma: español.', 'Language: English.'));
+    } catch (e) {
+      message(t('No se pudo cargar: $e', 'Could not load: $e'));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> chooseZip() async {
@@ -176,9 +216,9 @@ fi
       if (pick?.path == null) return;
       setState(() => busy = true);
       await loadZip(pick!.path!, label: pick.name);
-      message('Paquete $patchLabel verificado: ${files.length} tablas.');
+      message(t('Paquete $patchLabel verificado: ${files.length} tablas.', 'Package $patchLabel verified: ${files.length} tables.'));
     } catch (e) {
-      message('No se pudo cargar: $e');
+      message(t('No se pudo cargar: $e', 'Could not load: $e'));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -187,7 +227,7 @@ fi
   Future<void> loadZip(String path, {required String label}) async {
     InputFileStream? zipInput;
     try {
-      message('Validando el paquete…');
+      message(t('Validando el paquete…', 'Validating the package…'));
       zipInput = InputFileStream(path);
       final archive = ZipDecoder().decodeStream(zipInput);
       final manifests = archive.files
@@ -199,13 +239,13 @@ fi
       final json =
           jsonDecode(utf8.decode(manifests.single.content))
               as Map<String, dynamic>;
-      if (json['format'] != 'gf2-es-patch' ||
+      if (!const ['gf2-lang-patch', 'gf2-es-patch'].contains(json['format']) ||
           json['schemaVersion'] != 1 ||
           json['gamePackage'] != game ||
           json['platform'] != 'android' ||
           json['files'] is! List ||
           (json['files'] as List).isEmpty) {
-        throw Exception('Este paquete no es del parche de GF2 para Android.');
+        throw Exception(t('Este paquete no es del parche de GF2 para Android.', 'This is not a GF2 Android patch package.'));
       }
       final ext = await getExternalStorageDirectory();
       if (ext == null) throw Exception('No hay almacenamiento externo.');
@@ -255,7 +295,7 @@ fi
     setState(() {
       busy = true;
       progress = 0;
-      status = 'Cerrando el juego y respaldando…';
+      status = t('Cerrando el juego y respaldando…', 'Closing the game and backing up…');
     });
     try {
       if (!await shizukuReady()) return;
@@ -267,6 +307,9 @@ fi
       final backup =
           lastBackup ??
           '${ext.path}/gf2_es_patch/backups/${DateTime.now().millisecondsSinceEpoch}';
+      // Hashes of every translated table we know (any language): those are
+      // never backed up as if they were the Chinese originals.
+      final patchedAll = {...patchedHashes.keys, ...files.map((f) => f['hash']!)};
       final script = StringBuffer('set -eu\nam force-stop $game || true\n');
       script.writeln('mkdir -p ${quote(backup)}');
       for (final f in files) {
@@ -278,7 +321,7 @@ fi
         script.writeln(
           'if [ ! -f ${quote(save)} ]; then '
           'got=\$(sha256sum ${quote(dst)} | cut -d " " -f1); '
-          'if [ "\$got" = ${quote(f['hash']!)} ]; then echo "__ALREADY__"; else cp -p ${quote(dst)} ${quote(save)}; fi; fi',
+          'case "\$got" in ${patchedAll.map(quote).join('|')}) echo "__ALREADY__";; *) cp -p ${quote(dst)} ${quote(save)};; esac; fi',
         );
       }
       script.writeln('echo __BACKUP_OK__');
@@ -292,7 +335,7 @@ fi
       var done = 0;
       try {
         for (final f in files) {
-          message('Instalando ${f['path']!.split('/').last}…');
+          message(t('Instalando ${f['path']!.split('/').last}…', 'Installing ${f['path']!.split('/').last}…'));
           final dst = '$gameRoot/${f['path']!}';
           final tmp = '$dst.gf2-es-tmp';
           final hash = quote(f['hash']!);
@@ -315,18 +358,23 @@ echo __PATCH_OK__
           final out = await command(restoreCommand(lastBackup!, gameRoot, paths));
           if (!out.contains('__RESTORE_OK__')) {
             throw Exception(
-              'Falló la instalación y no se pudo deshacer. El respaldo está en $lastBackup. $installError',
+              t('Falló la instalación y no se pudo deshacer. El respaldo está en $lastBackup. $installError',
+                'Install failed and could not be undone. The backup is in $lastBackup. $installError'),
             );
           }
         }
         throw Exception(
-          'Falló la instalación; se dejaron las tablas originales. $installError',
+          t('Falló la instalación; se dejaron las tablas originales. $installError',
+            'Install failed; the original tables were kept. $installError'),
         );
       }
-      setState(() => installed = true);
-      message('¡Listo! El juego está en español. Ábrelo normalmente.');
+      setState(() {
+        installed = true;
+        installedLocale = locale;
+      });
+      message(t('¡Listo! El juego está en español. Ábrelo normalmente.', 'Done! The game is in English. Open it as usual.'));
     } catch (e) {
-      message('No se completó: $e');
+      message(t('No se completó: $e', 'Not completed: $e'));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -356,7 +404,7 @@ echo __PATCH_OK__
     if (lastBackup == null || lastRoot == null || lastPaths.isEmpty) return;
     setState(() {
       busy = true;
-      status = 'Restaurando el chino original…';
+      status = t('Restaurando el chino original…', 'Restoring the original Chinese…');
     });
     try {
       if (!await shizukuReady()) return;
@@ -370,10 +418,11 @@ echo __PATCH_OK__
         lastRoot = null;
         lastPaths = [];
         installed = false;
+        installedLocale = null;
       });
-      message('Se restauraron las tablas originales en chino.');
+      message(t('Se restauraron las tablas originales en chino.', 'The original Chinese tables were restored.'));
     } catch (e) {
-      message('No se pudo restaurar: $e');
+      message(t('No se pudo restaurar: $e', 'Could not restore: $e'));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -457,7 +506,13 @@ echo __PATCH_OK__
       status.startsWith('No ') ||
       status.startsWith('Error') ||
       status.contains('Falló') ||
-      status.contains('Ojo');
+      status.contains('Ojo') ||
+      status.contains('failed') ||
+      status.contains('Warning') ||
+      status.startsWith('Not ') ||
+      status.startsWith('Could not') ||
+      status.startsWith('Shizuku error') ||
+      status.startsWith('Shizuku is not');
 
   @override
   Widget build(BuildContext context) {
@@ -508,16 +563,18 @@ echo __PATCH_OK__
                       _logo(),
                       const SizedBox(height: 20),
                       _popup(
-                        title: 'Parche en español',
+                        title: t('Parche de idioma', 'Language patch'),
                         children: [
-                          _sectionTitle('1', 'Conectar con Shizuku'),
+                          _languagePicker(),
+                          const SizedBox(height: 18),
+                          _sectionTitle('1', t('Conectar con Shizuku', 'Connect Shizuku')),
                           const SizedBox(height: 10),
                           _infoBox(
                             title: connected
-                                ? 'Recursos $client · tablas $tables'
-                                : 'Arranca Shizuku y concede el permiso',
+                                ? t('Recursos $client · tablas $tables', 'Resources $client · tables $tables')
+                                : t('Arranca Shizuku y concede el permiso', 'Start Shizuku and grant permission'),
                             badge: connected
-                                ? (writable ? 'Escritura OK' : 'Sin escritura')
+                                ? (writable ? t('Escritura OK', 'Write OK') : t('Sin escritura', 'Read only'))
                                 : null,
                             badgeOk: writable,
                             child: TextField(
@@ -536,35 +593,35 @@ echo __PATCH_OK__
                           ),
                           const SizedBox(height: 10),
                           _button_(
-                            connected ? 'Volver a comprobar' : 'Conectar',
+                            connected ? t('Volver a comprobar', 'Check again') : t('Conectar', 'Connect'),
                             busy ? null : check,
                             icon: 'img/game/icon_language.png',
                           ),
                           const SizedBox(height: 20),
-                          _sectionTitle('2', 'Paquete de traducción'),
+                          _sectionTitle('2', t('Paquete de traducción', 'Translation package')),
                           const SizedBox(height: 10),
                           _infoBox(
                             title: files.isNotEmpty
-                                ? '$patchLabel · ${files.length} tablas · tablas ${patchTables ?? '?'}'
-                                : 'Incluido en la app (se carga al conectar)',
-                            badge: files.isNotEmpty ? 'Verificado' : null,
+                                ? t('$patchLabel · ${files.length} tablas · tablas ${patchTables ?? '?'}', '$patchLabel · ${files.length} tables · tables ${patchTables ?? '?'}')
+                                : t('Incluido en la app (se carga al conectar)', 'Bundled in the app (loaded when connecting)'),
+                            badge: files.isNotEmpty ? t('Verificado', 'Verified') : null,
                             badgeOk: true,
                           ),
                           const SizedBox(height: 10),
                           _button_(
-                            'Usar otro ZIP',
+                            t('Usar otro ZIP', 'Use another ZIP'),
                             busy || !connected ? null : chooseZip,
                             light: true,
                           ),
                           const SizedBox(height: 20),
-                          _sectionTitle('3', 'Instalar'),
+                          _sectionTitle('3', t('Instalar', 'Install')),
                           const SizedBox(height: 12),
                           _button_(
                             busy
-                                ? 'Trabajando… ${(progress * 100).round()}%'
-                                : installed
-                                ? 'Reinstalar en español'
-                                : 'Instalar en español',
+                                ? t('Trabajando… ${(progress * 100).round()}%', 'Working… ${(progress * 100).round()}%')
+                                : installedLocale == locale
+                                ? t('Reinstalar en español', 'Reinstall in English')
+                                : t('Instalar en español', 'Install in English'),
                             canInstall ? install : null,
                             icon: 'img/game/icon_confirm.png',
                             accent: true,
@@ -578,7 +635,7 @@ echo __PATCH_OK__
                           if (lastPaths.isNotEmpty && !busy) ...[
                             const SizedBox(height: 10),
                             _button_(
-                              'Volver al chino',
+                              t('Volver al chino', 'Back to Chinese'),
                               restore,
                               icon: 'img/game/icon_uninstall.png',
                               height: 44,
@@ -616,7 +673,7 @@ echo __PATCH_OK__
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: const BoxDecoration(color: _orange),
         child: const Text(
-          'EDICIÓN EN ESPAÑOL  ·  v$patchVersion',
+          'ESPAÑOL · ENGLISH  ·  v$patchVersion',
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
@@ -625,6 +682,35 @@ echo __PATCH_OK__
           ),
         ),
       ),
+    ],
+  );
+
+  /// Two-way switch in the game's style: the active language is the dark tab.
+  Widget _languagePicker() => Row(
+    children: [
+      for (final (code, label) in const [('es', 'Español'), ('en', 'English')])
+        Expanded(
+          child: GestureDetector(
+            onTap: () => setLocale(code),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: locale == code ? _ink : Colors.white.withValues(alpha: .55),
+                border: Border.all(color: locale == code ? _orange : _line),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: locale == code ? _orange : _inkSoft,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+        ),
     ],
   );
 
@@ -670,7 +756,7 @@ echo __PATCH_OK__
             const Padding(
               padding: EdgeInsets.fromLTRB(10, 0, 10, 6),
               child: Text(
-                'GF2-ES // LANG-PATCH',
+                'GRIFFIN-ES-EN // LANG-PATCH',
                 textAlign: TextAlign.right,
                 style: TextStyle(fontSize: 8, letterSpacing: 2, color: _inkSoft),
               ),
@@ -835,7 +921,7 @@ echo __PATCH_OK__
             Container(width: 4, height: 14, color: _orange),
             const SizedBox(width: 8),
             const Text(
-              'GF2 EXILIUM ES',
+              'GRIFFIN ES/EN',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 11,

@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="GF2 Exilium ES"
+        android:label="GRIFFIN ES/EN"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <provider

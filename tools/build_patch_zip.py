@@ -1,10 +1,10 @@
-"""Builds gf2-es-android-<version>.zip: the Spanish language tables for the Android CN client.
+"""Builds gf2-<es|en>-android-<version>.zip: the Spanish or English language tables for the Android CN client.
 
 The tables are generated with the PC language patcher (pc/): every Chinese row is replaced by the official
-Global Spanish text (or the filtered machine translation) matched by its exact Chinese text; ids, order and every other
+Global Spanish/English text (or the filtered machine translation) matched by its exact Chinese text; ids, order and every other
 column stay as they are, and the page index is rebuilt and validated.
 
-    python tools/build_patch_zip.py --tables <folder with the original Chinese LangPackageTableCn*.bytes> --stc 1195672
+    python tools/build_patch_zip.py --tables <folder with the original Chinese LangPackageTableCn*.bytes> --stc 1195672 --locale es
 """
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tables", type=Path, required=True)
     parser.add_argument("--stc", required=True, help="StcTableVersion of those tables (GameConfig.cfg)")
+    parser.add_argument("--locale", choices=("es", "en"), default="es")
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
 
@@ -43,7 +44,7 @@ def main() -> int:
     files, payload, coverage = [], {}, {}
     for name, section in TABLES:
         original = (args.tables / name).read_bytes()
-        replacements, stats = build_replacements_from_pack(original, pack, "es", section)
+        replacements, stats = build_replacements_from_pack(original, pack, args.locale, section)
         patched, _, changed = replace_table_text(original, replacements)
         if changed != len(replacements):
             raise SystemExit(f"{name}: solo se aplicaron {changed} de {len(replacements)} filas")
@@ -52,15 +53,15 @@ def main() -> int:
         payload[path] = patched
         files.append({"path": path, "sha256": sha256(patched), "originalSha256": sha256(original), "size": len(patched)})
         coverage[section] = {k: stats[k] for k in ("target_rows", "translated", "official_translated", "machine_translated")}
-        print(f"{name}: {changed}/{stats['target_rows']} filas en español "
+        print(f"{name}: {changed}/{stats['target_rows']} filas traducidas ({args.locale}) "
               f"({stats['official_translated']} oficiales, {stats['machine_translated']} automáticas)")
 
     manifest = {
-        "format": "gf2-es-patch", "schemaVersion": 1, "platform": "android", "gamePackage": GAME,
-        "patchVersion": PATCH_VERSION, "stcTableVersion": args.stc, "coverage": coverage, "files": files,
+        "format": "gf2-lang-patch", "schemaVersion": 1, "platform": "android", "gamePackage": GAME,
+        "patchVersion": PATCH_VERSION, "locale": args.locale, "stcTableVersion": args.stc, "coverage": coverage, "files": files,
     }
     args.output.mkdir(parents=True, exist_ok=True)
-    out = args.output / f"gf2-es-android-{PATCH_VERSION}.zip"
+    out = args.output / f"gf2-{args.locale}-android-{PATCH_VERSION}.zip"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         for path, data in payload.items():

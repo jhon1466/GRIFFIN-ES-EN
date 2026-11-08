@@ -343,7 +343,7 @@ fi
 set -eu
 cp ${quote(f['source']!)} ${quote(tmp)}
 mode=\$(stat -c %a ${quote(dst)}); chmod "\$mode" ${quote(tmp)}
-if [ "\$(id -u)" = 0 ]; then chown --reference=${quote(dst)} ${quote(tmp)}; fi
+if [ "\$(id -u)" = 0 ]; then owner=\$(stat -c %u:%g ${quote(dst)}); chown "\$owner" ${quote(tmp)}; fi
 got=\$(sha256sum ${quote(tmp)} | cut -d " " -f1); [ "\$got" = $hash ]
 mv -f ${quote(tmp)} ${quote(dst)}
 got=\$(sha256sum ${quote(dst)} | cut -d " " -f1); [ "\$got" = $hash ]

@@ -25,7 +25,7 @@ from table_codec import replace_table_text, validate_structure  # noqa: E402
 
 GAME = "com.Sunborn.SnqxExilium"
 TABLES = (("LangPackageTableCnData.bytes", "main"), ("LangPackageTableCnBuiltinData.bytes", "builtin"))
-PATCH_VERSION = "1.1.0"
+PATCH_VERSION = "1.2.0"
 
 
 def sha256(data: bytes) -> str:

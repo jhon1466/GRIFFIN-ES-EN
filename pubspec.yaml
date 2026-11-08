@@ -1,7 +1,7 @@
 name: gf2_es_patch
 description: "Instalador Android del parche español de Girls' Frontline 2: Exilium (cliente CN) mediante Shizuku."
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.2.0+3
 
 environment:
   sdk: ^3.10.8

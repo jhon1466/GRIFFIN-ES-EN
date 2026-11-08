@@ -13,8 +13,8 @@ import 'package:shizuku_api/shizuku_api.dart';
 const game = 'com.Sunborn.SnqxExilium';
 const configPath = 'LocalCache/Data/GameConfig.cfg';
 const tablePath = 'LocalCache/Data/Table';
-String bundledPatch(String locale) => 'patch/gf2-$locale-android-1.1.0.zip';
-const patchVersion = '1.1.0';
+String bundledPatch(String locale) => 'patch/gf2-$locale-android-$patchVersion.zip';
+const patchVersion = '1.2.0';
 void main() => runApp(const PatchApp());
 
 class PatchApp extends StatelessWidget {

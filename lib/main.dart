@@ -14,7 +14,7 @@ const game = 'com.Sunborn.SnqxExilium';
 const configPath = 'LocalCache/Data/GameConfig.cfg';
 const tablePath = 'LocalCache/Data/Table';
 String bundledPatch(String locale) => 'patch/gf2-$locale-android-$patchVersion.zip';
-const patchVersion = '1.2.0';
+const patchVersion = '1.3.0';
 void main() => runApp(const PatchApp());
 
 class PatchApp extends StatelessWidget {
